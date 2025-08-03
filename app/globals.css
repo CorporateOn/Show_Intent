@@ -1,0 +1,11 @@
+/* app/globals.css */
+
+/* Tailwind base styles */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Optional: your own global styles */
+body {
+  @apply bg-white text-gray-900 antialiased;
+}
