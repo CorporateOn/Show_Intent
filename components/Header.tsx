@@ -48,7 +48,12 @@ const Header: React.FC = () => {
           <div className="flex-shrink-0">
             <div className="flex items-center">
                 {logoType === 'logo' && logoUrl ? (
-                    <img src={logoUrl} alt={`${restaurantName} Logo`} className="h-10 w-auto" />
+                    // A good standard size for a navbar logo
+                  <img
+                    src={logoUrl}
+                      alt={`${restaurantName} Logo`}
+                          className="h-12 w-auto object-contain"
+                                                                  />
                 ) : (
                     <span className="text-2xl font-bold transition-colors duration-500" style={{ color: textColor }}>
                         {restaurantName}

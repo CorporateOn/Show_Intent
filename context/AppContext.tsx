@@ -101,17 +101,34 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
   const [authStatus, setAuthStatus] = useState<AuthStatus>({ isAuthenticated: null, role: null });
   const [socket, setSocket] = useState<Socket | null>(null);
 
-  useEffect(() => {
-    const newSocket = io(); 
-    setSocket(newSocket);
-    newSocket.on("initial_orders", (initialOrders) => setOrders(initialOrders));
-    newSocket.on("new_order_received", (updatedOrders) => setOrders(updatedOrders));
+ useEffect(() => {
+    const initializeSocket = async () => {
+        // This fetch request "wakes up" the API route and initializes the server
+        await fetch('/api/socket');
+
+        const newSocket = io({
+            path: '/api/socket',
+        });
+        
+        setSocket(newSocket);
+
+        newSocket.on("initial_orders", (initialOrders) => setOrders(initialOrders));
+        newSocket.on("new_order_received", (updatedOrders) => setOrders(updatedOrders));
+    };
+
+    initializeSocket();
+
     try {
       const savedCart = localStorage.getItem('smartQrCart');
       if (savedCart) setCart(JSON.parse(savedCart));
     } catch (error) { console.error("Failed to parse cart from localStorage", error); }
-    return () => { newSocket.disconnect(); };
-  }, []);
+
+    return () => {
+        if (socket) {
+            socket.disconnect();
+        }
+    };
+}, []); // Empty dependency array ensures this runs only once
 
   useEffect(() => {
     localStorage.setItem('smartQrCart', JSON.stringify(cart));

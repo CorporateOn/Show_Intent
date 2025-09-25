@@ -1,36 +1,50 @@
 import { NextResponse } from 'next/server';
-import { writeFile } from 'fs/promises';
-import path from 'path';
-import { cwd } from 'process';
+import { createClient } from '@supabase/supabase-js';
+
+if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    throw new Error("Supabase URL or Service Key is not defined in environment variables.");
+}
+
+const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_KEY
+);
 
 export async function POST(request: Request) {
-  try {
-    const data = await request.formData();
-    const file: File | null = data.get('file') as unknown as File;
+    try {
+        const formData = await request.formData();
+        const file = formData.get('file') as File | null;
 
-    if (!file) {
-      return NextResponse.json({ success: false, error: 'No file found.' }, { status: 400 });
+        if (!file) {
+            return NextResponse.json({ error: 'No file provided.' }, { status: 400 });
+        }
+        
+        // Create a unique file path
+        const filePath = `public/${Date.now()}-${file.name}`;
+
+        // Upload the file to the 'menu-images' bucket
+        const { data, error: uploadError } = await supabase.storage
+            .from('menu-images') // The bucket name you created
+            .upload(filePath, file);
+
+        if (uploadError) {
+            console.error('Supabase upload error:', uploadError);
+            throw new Error('Failed to upload file to Supabase.');
+        }
+
+        // Get the public URL of the uploaded file
+        const { data: { publicUrl } } = supabase.storage
+            .from('menu-images')
+            .getPublicUrl(filePath);
+
+        if (!publicUrl) {
+            throw new Error('Could not get public URL for the uploaded file.');
+        }
+
+        return NextResponse.json({ url: publicUrl });
+
+    } catch (error) {
+        console.error('Error in upload route:', error);
+        return NextResponse.json({ error: 'Failed to upload file.' }, { status: 500 });
     }
-
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
-    // Create a unique filename
-    const filename = `${Date.now()}-${file.name.replace(/\s/g, '_')}`;
-    const uploadDir = path.join(cwd(), 'public/uploads');
-    const fullPath = path.join(uploadDir, filename);
-
-    // Ensure upload directory exists
-    await require('fs').promises.mkdir(uploadDir, { recursive: true });
-
-    await writeFile(fullPath, buffer);
-
-    console.log(`File uploaded to ${fullPath}`);
-    const publicUrl = `/uploads/${filename}`;
-
-    return NextResponse.json({ success: true, url: publicUrl });
-  } catch (error) {
-    console.error("Upload error:", error);
-    return NextResponse.json({ success: false, error: 'File upload failed.' }, { status: 500 });
-  }
 }

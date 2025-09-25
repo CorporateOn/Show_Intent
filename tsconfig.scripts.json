@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json", // Inherits settings from your main config
+  "compilerOptions": {
+    "module": "CommonJS", // Crucial for Node.js scripts
+    "moduleResolution": "node",
+    "noEmit": false, // Scripts need to be "emitted" (compiled) in memory
+    "isolatedModules": false // Not needed for scripts
+  },
+  "include": [
+    "scripts" // Only apply these settings to files in the 'scripts' folder
+  ]
+}
