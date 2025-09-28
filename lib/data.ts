@@ -1,55 +1,68 @@
-// FIXED: All types are now imported from the central types file
 import { SavableState, FoodItem, Category } from '@/types';
 import { createClient } from '@supabase/supabase-js';
 
-// Ensure your environment variables are set
+// Standard Supabase client setup
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
     throw new Error("Supabase URL or Service Key is not defined in environment variables.");
 }
-
-// Create a single, reusable Supabase client for the server-side
 const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
 );
-
 const SETTINGS_ROW_ID = 1;
 
-// This function creates the initial default data if the database is empty
-async function initializeDb(): Promise<void> {
-    console.log("Database tables are empty. Initializing with default values...");
-    
-    // 1. Insert default settings
-    const { error: settingsError } = await supabase
-        .from('settings')
-        .insert({ id: SETTINGS_ROW_ID }); // Inserts the default values from the table definition
-    
-    if (settingsError) throw new Error(`Could not initialize settings: ${settingsError.message}`);
+// ========= RACE CONDITION PREVENTION =========
+// This variable will hold the promise of the initialization task.
+// This ensures that even if _initializeDb is called 100 times simultaneously,
+// the actual database operations will only run ONCE.
+let initializationPromise: Promise<SavableState> | null = null;
+// ===========================================
 
-    // 2. Insert default categories
+async function _initializeDbAndGetData(): Promise<SavableState> {
+    console.log("Database is empty. Starting initialization...");
+    
     const defaultCategories = ['Appetizers', 'Main Courses', 'Desserts', 'Drinks'];
-    const { data: insertedCategories, error: categoriesError } = await supabase
-        .from('categories')
-        .insert(defaultCategories.map(name => ({ name })))
-        .select();
+    const defaultData: SavableState = {
+        restaurantName: 'My Awesome Restaurant',
+        currency: '$',
+        adminPassword: 'password',
+        waiterPassword: 'password',
+        backgroundImage: '',
+        headerBgColor: 'rgba(255, 255, 255, 0.8)',
+        headerTextColor: '#1e293b',
+        logoUrl: '',
+        logoType: 'text',
+        textColor: '#1e293b',
+        categories: defaultCategories,
+        menuItems: [],
+    };
 
-    if (categoriesError) throw new Error(`Could not initialize categories: ${categoriesError.message}`);
-
-    // 3. (Optional) Insert a sample menu item
-    if (insertedCategories && insertedCategories.length > 0) {
-        const { error: menuItemError } = await supabase.from('menu_items').insert({
-            name: 'Sample Burger',
-            description: 'A delicious sample burger to get you started.',
-            price: 9.99,
-            category_id: insertedCategories[0].id, // Assign to the first category
-            is_available: true,
-            image_url: `https://pzumvjvsvbvyhtvvyxvy.supabase.co/storage/v1/object/public/menu-images/sample-burger.png` // A default placeholder image
+    try {
+        await supabase.from('settings').insert({ 
+            id: SETTINGS_ROW_ID,
+            restaurant_name: defaultData.restaurantName,
+            currency: defaultData.currency,
+            admin_password: defaultData.adminPassword,
+            waiter_password: defaultData.waiterPassword,
         });
-        if (menuItemError) console.error("Could not add sample menu item:", menuItemError.message);
+        await supabase.from('categories').insert(defaultCategories.map(name => ({ name })));
+        
+        console.log("Database initialized successfully.");
+        return defaultData;
+
+    } catch (error: any) {
+        if (error.code === '23505') { // 'unique_violation'
+            console.warn("Race condition detected. Another process finished initialization first. Fetching existing data...");
+            // If we lost the race, the data now exists, so we can just read it.
+            return readDb(); 
+        }
+        throw new Error(`Could not initialize database: ${error.message}`);
+    } finally {
+        // Clear the promise so it can be re-run in the future if the DB is cleared again.
+        initializationPromise = null;
     }
 }
 
-// Reads data from all tables and assembles it into the SavableState object
 export async function readDb(): Promise<SavableState> {
   try {
     const [settingsResult, categoriesResult, menuItemsResult] = await Promise.all([
@@ -58,18 +71,22 @@ export async function readDb(): Promise<SavableState> {
         supabase.from('menu_items').select('*, category:categories(name)')
     ]);
 
+    // Check specifically for the "Row not found" error
     if (settingsResult.error && settingsResult.error.code === 'PGRST116') {
-        await initializeDb();
-        return await readDb(); // Retry after initialization
+        if (!initializationPromise) {
+            initializationPromise = _initializeDbAndGetData();
+        }
+        // All concurrent callers will wait for the SAME promise to resolve.
+        return initializationPromise;
     }
     
     if (settingsResult.error) throw settingsResult.error;
     if (categoriesResult.error) throw categoriesResult.error;
     if (menuItemsResult.error) throw menuItemsResult.error;
 
+    // --- If data exists, assemble and return it ---
     const settings = settingsResult.data;
     const categories: Category[] = categoriesResult.data.map(c => c.name);
-    
     const menuItems: FoodItem[] = menuItemsResult.data.map((item: any) => ({
         id: item.id.toString(),
         name: item.name,
@@ -80,7 +97,7 @@ export async function readDb(): Promise<SavableState> {
         isAvailable: item.is_available
     }));
 
-    const state: SavableState = {
+    return {
         restaurantName: settings.restaurant_name,
         currency: settings.currency,
         adminPassword: settings.admin_password,
@@ -95,19 +112,15 @@ export async function readDb(): Promise<SavableState> {
         menuItems
     };
     
-    return state;
-
   } catch (error) {
     console.error('Error reading from Supabase:', error);
     throw new Error('Could not read from database.');
   }
 }
 
-// !!!!!!!!!!! THE FIX IS HERE !!!!!!!!!!!
-// Ensure this function has the 'export' keyword in front of it.
 export async function writeDb(data: SavableState) {
   try {
-    // 1. Update the single row in settings
+    // 1. Update settings (this part is correct)
     await supabase
         .from('settings')
         .update({
@@ -124,7 +137,7 @@ export async function writeDb(data: SavableState) {
         })
         .eq('id', SETTINGS_ROW_ID);
 
-    // 2. Synchronize Categories
+    // 2. Synchronize Categories (this part is correct)
     const { data: dbCategories } = await supabase.from('categories').select('id, name');
     if (!dbCategories) throw new Error('Could not fetch categories for sync.');
     const appCategoryNames = new Set(data.categories);
@@ -138,11 +151,14 @@ export async function writeDb(data: SavableState) {
         await supabase.from('categories').delete().in('id', categoriesToDelete.map(c => c.id));
     }
     
-    // 3. Synchronize Menu Items
+    // =================================================================
+    // 3. Synchronize Menu Items (COMPLETELY REWRITTEN FOR ROBUSTNESS)
+    // =================================================================
     const { data: allCategoriesAfterSync } = await supabase.from('categories').select('id, name');
     if (!allCategoriesAfterSync) throw new Error('Could not fetch categories for item sync.');
     const categoryNameToIdMap = new Map(allCategoriesAfterSync.map(c => [c.name, c.id]));
     
+    // First, handle deletions
     const appItemIds = new Set(data.menuItems.map(item => item.id));
     const { data: dbItems } = await supabase.from('menu_items').select('id');
     if(!dbItems) throw new Error('Could not fetch menu items for sync.');
@@ -151,19 +167,40 @@ export async function writeDb(data: SavableState) {
         await supabase.from('menu_items').delete().in('id', itemsToDelete.map(item => item.id));
     }
 
-    const menuItemsToUpsert = data.menuItems.map(item => ({
-        id: item.id.startsWith('item-') ? undefined : item.id,
-        name: item.name,
-        description: item.description,
-        price: item.price,
-        image_url: item.image,
-        is_available: item.isAvailable,
-        category_id: categoryNameToIdMap.get(item.category)
-    }));
-    
-    if (menuItemsToUpsert.length > 0) {
-        const { error: menuItemsError } = await supabase.from('menu_items').upsert(menuItemsToUpsert);
-        if (menuItemsError) throw new Error(`Menu items sync failed: ${menuItemsError.message}`);
+    // Next, separate new items from existing items
+    const itemsToInsert = [];
+    const itemsToUpdate = [];
+
+    for (const item of data.menuItems) {
+        // Create a common data structure for the item
+        const dbItemPayload = {
+            name: item.name,
+            description: item.description,
+            price: item.price,
+            image_url: item.image,
+            is_available: item.isAvailable,
+            category_id: categoryNameToIdMap.get(item.category)
+        };
+
+        if (item.id.startsWith('item-')) {
+            // This is a NEW item. Push it to the insert array WITHOUT an ID.
+            itemsToInsert.push(dbItemPayload);
+        } else {
+            // This is an EXISTING item. Push it to the update array WITH its ID.
+            itemsToUpdate.push({ id: item.id, ...dbItemPayload });
+        }
+    }
+
+    // Perform the INSERT operation for new items
+    if (itemsToInsert.length > 0) {
+        const { error: insertError } = await supabase.from('menu_items').insert(itemsToInsert);
+        if (insertError) throw new Error(`Menu items insert failed: ${insertError.message}`);
+    }
+
+    // Perform the UPSERT operation for existing items (this will update them)
+    if (itemsToUpdate.length > 0) {
+        const { error: updateError } = await supabase.from('menu_items').upsert(itemsToUpdate);
+        if (updateError) throw new Error(`Menu items update failed: ${updateError.message}`);
     }
 
   } catch (error) {
@@ -172,7 +209,6 @@ export async function writeDb(data: SavableState) {
   }
 }
 
-// This function is also exported correctly
 export async function getInitialServerData() {
     console.log("Fetching initial data from Supabase on the server...");
     const data = await readDb();
