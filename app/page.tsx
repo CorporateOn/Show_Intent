@@ -1,6 +1,6 @@
 'use client'
 import React, { useState, useMemo, useEffect } from 'react';
-import { FoodItem, Order } from '@/types';
+import { FoodItem } from '@/types';
 import { useAppContext } from '@/context/AppContext';
 import FoodItemCard from '@/components/FoodItemCard';
 import { SearchIcon, CartIcon } from '@/components/IconComponents';
@@ -8,16 +8,21 @@ import Cart from '@/components/Cart';
 import ClientOnly from '@/components/ClientOnly';
 
 const CustomerMenu: React.FC = () => {
-  // 1. ALL HOOKS ARE CALLED UNCONDITIONALLY AT THE TOP
-  const { menuItems, categories, orders, backgroundImage, cart, isDataLoaded } = useAppContext();
+  const { menuItems, categories, orders, backgroundImage, cart, isDataLoaded, clearCart, restaurantName } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [showThankYou, setShowThankYou] = useState(false);
+  const [orderType, setOrderType] = useState<'dinein' | 'takeaway'>('dinein');
+
+  useEffect(() => {
+    if (cart.length > 0) {
+      clearCart();
+    }
+  }, [orderType, clearCart]);
 
   const filteredItems = useMemo(() => {
-    // Return early from inside the hook if data isn't ready
-    if (!isDataLoaded) return []; 
+    if (!isDataLoaded) return [];
     return menuItems.filter(item => {
       const matchesCategory = selectedCategory ? item.category === selectedCategory : true;
       const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -59,7 +64,6 @@ const CustomerMenu: React.FC = () => {
     setSearchTerm(e.target.value);
   };
   
-  // 2. NOW, YOU CAN HAVE CONDITIONAL RENDERING
   if (!isDataLoaded) {
     return (
       <div className="container mx-auto p-8 text-center" aria-live="polite">
@@ -75,7 +79,33 @@ const CustomerMenu: React.FC = () => {
             Thank you for your order! It has been completed.
         </div>
       )}
+      
+      {/* 🆕 Hero Section */}
+      <div className="relative mb-10 rounded-2xl overflow-hidden shadow-xl">
+        <div className="absolute inset-0 bg-gradient-to-r from-brand-primary/80 to-brand-secondary/80 mix-blend-multiply" />
+        <div 
+          className="relative py-16 px-6 text-center bg-cover bg-center"
+          style={{ backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none' }}
+        >
+          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4 drop-shadow-lg">
+            {restaurantName}
+          </h1>
+          <p className="text-xl text-white/90 max-w-2xl mx-auto drop-shadow">
+            Delicious meals crafted with passion. Dine in or take away.
+          </p>
+        </div>
+      </div>
+
+      {/* 🆕 Special Offers Banner */}
+      <div className="bg-amber-100 border-l-4 border-amber-500 text-amber-800 p-4 mb-6 rounded-r-lg shadow-md">
+        <p className="font-semibold flex items-center">
+          <span className="text-2xl mr-3">🔥</span>
+          Today's Special: free delivery on orders over $Nle 1000!
+        </p>
+      </div>
+
       <div className="bg-white/90 backdrop-blur-sm rounded-lg shadow-md p-4 mb-6">
+        {/* Search bar */}
         <div className="relative mb-4">
           <input
             type="text"
@@ -87,7 +117,9 @@ const CustomerMenu: React.FC = () => {
           />
           <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
         </div>
-        <div className="flex flex-wrap gap-2 justify-center">
+
+        {/* Category filters */}
+        <div className="flex flex-wrap gap-2 justify-center mb-4">
           <button
             onClick={() => setSelectedCategory(null)}
             className={`px-4 py-2 rounded-full text-sm font-semibold transition-colors ${selectedCategory === null ? 'bg-brand-primary text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
@@ -104,12 +136,40 @@ const CustomerMenu: React.FC = () => {
             </button>
           ))}
         </div>
+
+        {/* Order type toggle */}
+        <div className="flex justify-end items-center mt-4">
+          <span className="mr-2 text-gray-700 text-sm font-medium">Order type:</span>
+          <div className="flex rounded-md shadow-sm">
+            <button
+              onClick={() => setOrderType('dinein')}
+              className={`px-4 py-2 text-sm font-medium rounded-l-md transition-colors ${
+                orderType === 'dinein'
+                  ? 'bg-brand-primary text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Dine‑in
+            </button>
+            <button
+              onClick={() => setOrderType('takeaway')}
+              className={`px-4 py-2 text-sm font-medium rounded-r-md transition-colors ${
+                orderType === 'takeaway'
+                  ? 'bg-brand-primary text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
+              Takeaway
+            </button>
+          </div>
+        </div>
       </div>
 
+      {/* Menu items grid */}
       {filteredItems.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredItems.map((item: FoodItem) =>  (
-            <FoodItemCard key={item.id} item={item} />
+          {filteredItems.map((item: FoodItem) => (
+            <FoodItemCard key={item.id} item={item} orderType={orderType} />
           ))}
         </div>
       ) : (
@@ -121,14 +181,14 @@ const CustomerMenu: React.FC = () => {
       
       <ClientOnly>
         {cart.length > 0 && (
-            <button
-                onClick={() => setIsCartOpen(true)}
-                className="fixed bottom-6 right-6 bg-brand-primary text-white font-bold py-4 px-6 rounded-full shadow-lg hover:bg-indigo-700 transition-all transform hover:scale-110 flex items-center animate-fade-in"
-                aria-label={`Open cart with ${cart.reduce((total, item) => total + item.quantity, 0)} items`}
-            >
-                <CartIcon className="h-6 w-6 mr-2" />
-                Check Cart
-            </button>
+          <button
+            onClick={() => setIsCartOpen(true)}
+            className="fixed bottom-6 right-6 bg-brand-primary text-white font-bold py-4 px-6 rounded-full shadow-lg hover:bg-indigo-700 transition-all transform hover:scale-110 flex items-center animate-fade-in"
+            aria-label={`Open cart with ${cart.reduce((total, item) => total + item.quantity, 0)} items`}
+          >
+            <CartIcon className="h-6 w-6 mr-2" />
+            Check Cart
+          </button>
         )}
         <Cart isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
       </ClientOnly>

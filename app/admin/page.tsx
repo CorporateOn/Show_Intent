@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppContext } from '@/context/AppContext';
+import Link from 'next/link'; 
 import { FoodItem } from '@/types';
 import { TrashIcon, SparklesIcon } from '@/components/IconComponents';
 
@@ -24,7 +25,14 @@ const AdminDashboard: React.FC = () => {
 
     const [showSaveSuccess, setShowSaveSuccess] = useState(false);
     const [editingItem, setEditingItem] = useState<FoodItem | null>(null);
-    const [formState, setFormState] = useState<FormState>({ name: '', description: '', price: 0, category: '', image: '' });
+    const [formState, setFormState] = useState<FormState>({ 
+        name: '', 
+        description: '', 
+        price: 0, 
+        takeawayPrice: 0,   // new field
+        category: '', 
+        image: '' 
+    });
     const [isGenerating, setIsGenerating] = useState(false);
     const [newCategory, setNewCategory] = useState('');
     const [editingCategory, setEditingCategory] = useState<{ old: string, new: string } | null>(null);
@@ -44,7 +52,14 @@ const AdminDashboard: React.FC = () => {
 
     useEffect(() => {
         if (editingItem) {
-            setFormState({ name: editingItem.name, description: editingItem.description, price: editingItem.price, category: editingItem.category, image: editingItem.image });
+            setFormState({ 
+                name: editingItem.name, 
+                description: editingItem.description, 
+                price: editingItem.price, 
+                takeawayPrice: editingItem.takeawayPrice ?? 0, 
+                category: editingItem.category, 
+                image: editingItem.image 
+            });
         } else {
             resetForm();
         }
@@ -57,7 +72,14 @@ const AdminDashboard: React.FC = () => {
     };
     
     const resetForm = () => {
-        setFormState({ name: '', description: '', price: 0, category: categories[0] || '', image: '' });
+        setFormState({ 
+            name: '', 
+            description: '', 
+            price: 0, 
+            takeawayPrice: 0, 
+            category: categories[0] || '', 
+            image: '' 
+        });
         setEditingItem(null);
     };
 
@@ -65,7 +87,7 @@ const AdminDashboard: React.FC = () => {
         const { name, value } = e.target;
         setFormState(prev => ({ 
             ...prev, 
-            [name]: name === 'price' ? (parseFloat(value) || 0) : value 
+            [name]: (name === 'price' || name === 'takeawayPrice') ? (parseFloat(value) || 0) : value 
         }));
     };
 
@@ -124,7 +146,10 @@ const AdminDashboard: React.FC = () => {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        const finalFormState = { ...formState, image: formState.image || `https://picsum.photos/seed/${formState.name.replace(/\s/g, '')}/400/300` };
+        const finalFormState = { 
+            ...formState, 
+            image: formState.image || `https://picsum.photos/seed/${formState.name.replace(/\s/g, '')}/400/300` 
+        };
         if (editingItem) updateMenuItem({ ...editingItem, ...finalFormState });
         else addMenuItem(finalFormState);
         resetForm();
@@ -156,6 +181,14 @@ const AdminDashboard: React.FC = () => {
                 <h1 className="text-3xl font-bold text-brand-dark">Admin Dashboard</h1>
                 <button onClick={handleSave} className="bg-green-500 text-white font-bold py-2 px-6 rounded-lg hover:bg-green-600 transition-colors shadow-md">Save All Changes</button>
             </div>
+      <div className="mb-6">
+        <Link
+          href="/admin/about"
+          className="inline-block bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+        >
+          Edit About Page
+        </Link>
+      </div>
             
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-1 space-y-8">
@@ -181,8 +214,13 @@ const AdminDashboard: React.FC = () => {
                                 </button>
                             </div>
                             <div>
-                                <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1">Price</label>
+                                <label htmlFor="price" className="block text-sm font-medium text-gray-700 mb-1">Dine‑in Price</label>
                                 <input type="number" name="price" value={formState.price} onChange={handleInputChange} className="w-full p-2 border rounded-md" required step="0.01" />
+                            </div>
+                            <div>
+                                <label htmlFor="takeawayPrice" className="block text-sm font-medium text-gray-700 mb-1">Takeaway Price (optional)</label>
+                                <input type="number" name="takeawayPrice" value={formState.takeawayPrice} onChange={handleInputChange} className="w-full p-2 border rounded-md" step="0.01" placeholder="Leave blank to use dine‑in price" />
+                                <p className="text-xs text-gray-500 mt-1">If 0, takeaway will use the dine‑in price.</p>
                             </div>
                             <div>
                                 <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">Category</label>
@@ -300,7 +338,10 @@ const AdminDashboard: React.FC = () => {
                                     <img src={item.image} alt={item.name} className="w-16 h-16 object-cover rounded-md mr-4 flex-shrink-0" />
                                     <div className="flex-grow">
                                         <p className="font-semibold text-gray-800">{item.name}</p>
-                                        <p className="text-sm text-gray-500">{item.category} - {currency} {item.price.toFixed(2)}</p>
+                                        <p className="text-sm text-gray-500">
+                                            {item.category} – Dine‑in: {currency} {item.price.toFixed(2)} 
+                                            {item.takeawayPrice > 0 && ` | Takeaway: ${currency} ${item.takeawayPrice.toFixed(2)}`}
+                                        </p>
                                     </div>
                                     <div className="flex items-center space-x-3 flex-shrink-0">
                                         <div className="flex items-center space-x-2">

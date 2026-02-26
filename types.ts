@@ -1,32 +1,27 @@
-// This is the central definition for all data types in the application.
-
-// A single category name, e.g., "Appetizers"
 export type Category = string;
 
-// The structure for a single food item on the menu
 export interface FoodItem {
-  id: string;        // Can be a database ID or a temporary one
+  id: string;
   name: string;
   description: string;
   price: number;
+  takeawayPrice: number;
   category: Category;
   image: string;
   isAvailable: boolean;
 }
 
-// Extends FoodItem with a quantity for use in the shopping cart
 export interface CartItem extends FoodItem {
   quantity: number;
 }
 
-// The structure for a customer's order
 export interface Order {
   id: string;
   items: CartItem[];
   totalPrice: number;
   timestamp: Date;
   table: string;
-  isComplete?: boolean; // Optional property
+  isComplete?: boolean;
 }
 
 export interface SavableState {
@@ -39,7 +34,18 @@ export interface SavableState {
   backgroundImage: string;
   headerBgColor: string;
   headerTextColor: string;
-  logoUrl: string; 
-  logoType: 'text' | 'logo'; 
+  logoUrl: string;
+  logoType: 'text' | 'logo';
   textColor: string;
+  aboutDescription: string;
+  aboutLocation: string;
+  aboutPhone: string;
+  aboutEmail: string;
+  aboutOwnerName: string;
+  aboutOwnerTitle: string;
+  aboutOwnerQuote: string;
+  aboutOwnerStory: string;
+  aboutOwnerImage: string;
+  aboutMotivationQuotes: string[];
+  aboutMapEmbed: string;
 }

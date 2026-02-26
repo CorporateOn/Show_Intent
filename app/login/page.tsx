@@ -14,12 +14,14 @@ const LoginPage: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
 
     // This determines if the admin login option should be visible
-    const isAdminLogin = searchParams.get('role') === 'admin';
+    const isAdminLogin = searchParams?.get('role') === 'admin';
 
     useEffect(() => {
-        const roleFromQuery = searchParams.get('role');
+        const roleFromQuery = searchParams?.get('role');
         if (roleFromQuery === 'admin' || roleFromQuery === 'waiter') {
             setRole(roleFromQuery);
+
+            // oslow param function is underlined 
         }
     }, [searchParams]);
 
@@ -52,9 +54,7 @@ const LoginPage: React.FC = () => {
     return (
         <div className="flex items-center justify-center min-h-[80vh] bg-slate-100">
             <div className="p-8 bg-white rounded-lg shadow-xl w-full max-w-sm m-4">
-                
-                {/* --- THIS IS THE NEW CONDITIONAL RENDERING --- */}
-                {/* The toggle only shows if the admin explicitly navigates here */}
+            
                 {isAdminLogin && (
                     <div className="flex justify-center mb-6">
                         <button 

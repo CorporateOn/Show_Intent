@@ -1,7 +1,6 @@
 import { SavableState, FoodItem, Category } from '@/types';
 import { createClient } from '@supabase/supabase-js';
 
-// Standard Supabase client setup
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
     throw new Error("Supabase URL or Service Key is not defined in environment variables.");
 }
@@ -11,12 +10,7 @@ const supabase = createClient(
 );
 const SETTINGS_ROW_ID = 1;
 
-// ========= RACE CONDITION PREVENTION =========
-// This variable will hold the promise of the initialization task.
-// This ensures that even if _initializeDb is called 100 times simultaneously,
-// the actual database operations will only run ONCE.
 let initializationPromise: Promise<SavableState> | null = null;
-// ===========================================
 
 async function _initializeDbAndGetData(): Promise<SavableState> {
     console.log("Database is empty. Starting initialization...");
@@ -35,6 +29,18 @@ async function _initializeDbAndGetData(): Promise<SavableState> {
         textColor: '#1e293b',
         categories: defaultCategories,
         menuItems: [],
+        // About fields – provide default empty values
+        aboutDescription: '',
+        aboutLocation: '',
+        aboutPhone: '',
+        aboutEmail: '',
+        aboutOwnerName: '',
+        aboutOwnerTitle: '',
+        aboutOwnerQuote: '',
+        aboutOwnerStory: '',
+        aboutOwnerImage: '',
+        aboutMotivationQuotes: [],
+        aboutMapEmbed: '',
     };
 
     try {
@@ -53,12 +59,10 @@ async function _initializeDbAndGetData(): Promise<SavableState> {
     } catch (error: any) {
         if (error.code === '23505') { // 'unique_violation'
             console.warn("Race condition detected. Another process finished initialization first. Fetching existing data...");
-            // If we lost the race, the data now exists, so we can just read it.
-            return readDb(); 
+            return readDb();
         }
         throw new Error(`Could not initialize database: ${error.message}`);
     } finally {
-        // Clear the promise so it can be re-run in the future if the DB is cleared again.
         initializationPromise = null;
     }
 }
@@ -71,12 +75,10 @@ export async function readDb(): Promise<SavableState> {
         supabase.from('menu_items').select('*, category:categories(name)')
     ]);
 
-    // Check specifically for the "Row not found" error
     if (settingsResult.error && settingsResult.error.code === 'PGRST116') {
         if (!initializationPromise) {
             initializationPromise = _initializeDbAndGetData();
         }
-        // All concurrent callers will wait for the SAME promise to resolve.
         return initializationPromise;
     }
     
@@ -84,7 +86,6 @@ export async function readDb(): Promise<SavableState> {
     if (categoriesResult.error) throw categoriesResult.error;
     if (menuItemsResult.error) throw menuItemsResult.error;
 
-    // --- If data exists, assemble and return it ---
     const settings = settingsResult.data;
     const categories: Category[] = categoriesResult.data.map(c => c.name);
     const menuItems: FoodItem[] = menuItemsResult.data.map((item: any) => ({
@@ -92,6 +93,7 @@ export async function readDb(): Promise<SavableState> {
         name: item.name,
         description: item.description,
         price: item.price,
+        takeawayPrice: item.takeaway_price ?? 0,
         category: item.category?.name || 'Uncategorized',
         image: item.image_url,
         isAvailable: item.is_available
@@ -109,7 +111,18 @@ export async function readDb(): Promise<SavableState> {
         logoType: settings.logo_type,
         textColor: settings.text_color,
         categories,
-        menuItems
+        menuItems,
+        aboutDescription: settings.about_description || '',
+        aboutLocation: settings.about_location || '',
+        aboutPhone: settings.about_phone || '',
+        aboutEmail: settings.about_email || '',
+        aboutOwnerName: settings.about_owner_name || '',
+        aboutOwnerTitle: settings.about_owner_title || '',
+        aboutOwnerQuote: settings.about_owner_quote || '',
+        aboutOwnerStory: settings.about_owner_story || '',
+        aboutOwnerImage: settings.about_owner_image_url || '',
+        aboutMotivationQuotes: settings.about_motivation_quotes || [],
+        aboutMapEmbed: settings.about_map_embed || '',
     };
     
   } catch (error) {
@@ -120,7 +133,7 @@ export async function readDb(): Promise<SavableState> {
 
 export async function writeDb(data: SavableState) {
   try {
-    // 1. Update settings (this part is correct)
+    // 1. Update settings
     await supabase
         .from('settings')
         .update({
@@ -134,10 +147,21 @@ export async function writeDb(data: SavableState) {
             logo_url: data.logoUrl,
             logo_type: data.logoType,
             text_color: data.textColor,
+            about_description: data.aboutDescription,
+            about_location: data.aboutLocation,
+            about_phone: data.aboutPhone,
+            about_email: data.aboutEmail,
+            about_owner_name: data.aboutOwnerName,
+            about_owner_title: data.aboutOwnerTitle,
+            about_owner_quote: data.aboutOwnerQuote,
+            about_owner_story: data.aboutOwnerStory,
+            about_owner_image_url: data.aboutOwnerImage,
+            about_motivation_quotes: data.aboutMotivationQuotes,
+            about_map_embed: data.aboutMapEmbed,
         })
         .eq('id', SETTINGS_ROW_ID);
 
-    // 2. Synchronize Categories (this part is correct)
+    // 2. Synchronize Categories
     const { data: dbCategories } = await supabase.from('categories').select('id, name');
     if (!dbCategories) throw new Error('Could not fetch categories for sync.');
     const appCategoryNames = new Set(data.categories);
@@ -151,14 +175,12 @@ export async function writeDb(data: SavableState) {
         await supabase.from('categories').delete().in('id', categoriesToDelete.map(c => c.id));
     }
     
-    // =================================================================
-    // 3. Synchronize Menu Items (COMPLETELY REWRITTEN FOR ROBUSTNESS)
-    // =================================================================
+    // 3. Synchronize Menu Items
     const { data: allCategoriesAfterSync } = await supabase.from('categories').select('id, name');
     if (!allCategoriesAfterSync) throw new Error('Could not fetch categories for item sync.');
     const categoryNameToIdMap = new Map(allCategoriesAfterSync.map(c => [c.name, c.id]));
     
-    // First, handle deletions
+    // Delete items that are no longer in the app
     const appItemIds = new Set(data.menuItems.map(item => item.id));
     const { data: dbItems } = await supabase.from('menu_items').select('id');
     if(!dbItems) throw new Error('Could not fetch menu items for sync.');
@@ -167,37 +189,32 @@ export async function writeDb(data: SavableState) {
         await supabase.from('menu_items').delete().in('id', itemsToDelete.map(item => item.id));
     }
 
-    // Next, separate new items from existing items
     const itemsToInsert = [];
     const itemsToUpdate = [];
 
     for (const item of data.menuItems) {
-        // Create a common data structure for the item
         const dbItemPayload = {
             name: item.name,
             description: item.description,
             price: item.price,
+            takeaway_price: item.takeawayPrice,
             image_url: item.image,
             is_available: item.isAvailable,
             category_id: categoryNameToIdMap.get(item.category)
         };
 
         if (item.id.startsWith('item-')) {
-            // This is a NEW item. Push it to the insert array WITHOUT an ID.
             itemsToInsert.push(dbItemPayload);
         } else {
-            // This is an EXISTING item. Push it to the update array WITH its ID.
             itemsToUpdate.push({ id: item.id, ...dbItemPayload });
         }
     }
 
-    // Perform the INSERT operation for new items
     if (itemsToInsert.length > 0) {
         const { error: insertError } = await supabase.from('menu_items').insert(itemsToInsert);
         if (insertError) throw new Error(`Menu items insert failed: ${insertError.message}`);
     }
 
-    // Perform the UPSERT operation for existing items (this will update them)
     if (itemsToUpdate.length > 0) {
         const { error: updateError } = await supabase.from('menu_items').upsert(itemsToUpdate);
         if (updateError) throw new Error(`Menu items update failed: ${updateError.message}`);

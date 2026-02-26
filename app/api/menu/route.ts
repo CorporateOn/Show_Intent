@@ -1,5 +1,3 @@
-// app/api/menu/route.ts
-
 import { NextResponse } from 'next/server';
 import { readDb, writeDb } from '@/lib/data';
 import { cookies } from 'next/headers';
@@ -7,15 +5,12 @@ import { jwtVerify } from 'jose';
 
 const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET);
 
-// --- THIS IS THE HIGH-PERFORMANCE CACHE ---
 let menuCache: any = null;
 
 async function getMenuData() {
-    // If the data is already in our cache, return it instantly
     if (menuCache) {
         return menuCache;
     }
-    // If not, read it from the slow disk file
     const db = await readDb();
     const data = {
         restaurantName: db.restaurantName,
@@ -28,12 +23,9 @@ async function getMenuData() {
         categories: db.categories,
         menuItems: db.menuItems,
     };
-    // Store it in the cache for next time
     menuCache = data;
     return data;
 }
-
-// This function will clear the cache whenever the menu is updated
 function invalidateMenuCache() {
     menuCache = null;
 }
@@ -69,7 +61,7 @@ export async function POST(request: Request) {
   try {
     const updatedData = await request.json();
     await writeDb(updatedData);
-    invalidateMenuCache(); // IMPORTANT: Clear the cache so the next GET request reads the new data
+    invalidateMenuCache();
     return NextResponse.json({ success: true, message: 'Settings saved successfully' });
   } catch (error) {
     console.error('Failed to save settings:', error);

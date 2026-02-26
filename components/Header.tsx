@@ -26,7 +26,7 @@ const Header: React.FC = () => {
     return (
         <header className="shadow-md sticky top-0 z-40 bg-gray-200 animate-pulse">
             <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center justify-between h-16">
+                <div className="flex items-center justify-between min-h-16">
                     <div className="h-6 w-48 bg-gray-300 rounded"></div>
                     <div className="flex items-center space-x-4"><div className="h-6 w-20 bg-gray-300 rounded"></div><div className="h-6 w-20 bg-gray-300 rounded"></div></div>
                 </div>
@@ -43,17 +43,16 @@ const Header: React.FC = () => {
       style={{ backgroundColor: headerBgColor }}
     >
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between min-h-16 py-2">
           
           <div className="flex-shrink-0">
             <div className="flex items-center">
                 {logoType === 'logo' && logoUrl ? (
-                    // A good standard size for a navbar logo
                   <img
                     src={logoUrl}
-                      alt={`${restaurantName} Logo`}
-                          className="h-12 w-auto object-contain"
-                                                                  />
+                    alt={`${restaurantName} Logo`}
+                    className="max-h-16 w-auto object-contain"
+                  />
                 ) : (
                     <span className="text-2xl font-bold transition-colors duration-500" style={{ color: textColor }}>
                         {restaurantName}
@@ -63,43 +62,51 @@ const Header: React.FC = () => {
           </div>
 
           <nav className="hidden md:flex items-center space-x-4">
-            <Link href="/" className={navLinkClass('/')} style={{ color: dynamicTextColor }}>Menu</Link>
-            {authStatus.isAuthenticated && (authStatus.role === 'admin') && (
-              <>
-                <Link href="/waiter" className={navLinkClass('/waiter')} style={{ color: dynamicTextColor }}>
-                    Waiter View
-                    <ClientOnly>{orders.length > 0 && (<span className="absolute -top-2 -right-2 flex items-center justify-center h-5 w-5 bg-red-500 text-white text-xs rounded-full">{orders.length}</span>)}</ClientOnly>
-                </Link>
-                <Link href="/admin" className={navLinkClass('/admin')} style={{ color: dynamicTextColor }}>Admin</Link>
-              </>
-            )}
-             {authStatus.isAuthenticated && (authStatus.role === 'waiter') && (
-                <Link href="/waiter" className={navLinkClass('/waiter')} style={{ color: dynamicTextColor }}>
-                    Waiter View
-                    <ClientOnly>{orders.length > 0 && (<span className="absolute -top-2 -right-2 flex items-center justify-center h-5 w-5 bg-red-500 text-white text-xs rounded-full">{orders.length}</span>)}</ClientOnly>
-                </Link>
-            )}
-            
-            {authStatus.isAuthenticated ? (
-               <button onClick={logout} className={buttonClass} style={{ color: dynamicTextColor }}>Logout</button>
-            ) : (
-                // --- THIS IS THE MODIFIED LINK ---
-                <Link href="/login?role=waiter" className={navLinkClass('/login')}>
-                  <span style={{ color: dynamicTextColor }}>Waiter Login</span>
-                </Link>
-            )}
-          </nav>
+          <Link href="/" className={navLinkClass('/')} style={{ color: dynamicTextColor }}>Menu</Link>
+          <Link href="/about" className={navLinkClass('/about')} style={{ color: dynamicTextColor }}>About</Link>
+          {authStatus.isAuthenticated && (authStatus.role === 'admin') && (
+            <>
+              <Link href="/waiter" className={navLinkClass('/waiter')} style={{ color: dynamicTextColor }}>
+                  Waiter View
+                  <ClientOnly>{orders.length > 0 && (<span className="absolute -top-2 -right-2 flex items-center justify-center h-5 w-5 bg-red-500 text-white text-xs rounded-full">{orders.length}</span>)}</ClientOnly>
+              </Link>
+              <Link href="/admin" className={navLinkClass('/admin')} style={{ color: dynamicTextColor }}>Admin</Link>
+            </>
+          )}
+          {authStatus.isAuthenticated && (authStatus.role === 'waiter') && (
+              <Link href="/waiter" className={navLinkClass('/waiter')} style={{ color: dynamicTextColor }}>
+                  Waiter View
+                  <ClientOnly>{orders.length > 0 && (<span className="absolute -top-2 -right-2 flex items-center justify-center h-5 w-5 bg-red-500 text-white text-xs rounded-full">{orders.length}</span>)}</ClientOnly>
+              </Link>
+          )}
+          
+          {authStatus.isAuthenticated ? (
+            <button onClick={logout} className={buttonClass} style={{ color: dynamicTextColor }}>Logout</button>
+          ) : null}
+        </nav>
           
           <ClientOnly>
             {isCustomerView && (
-              <button onClick={() => {}} className="relative">
-                <CartIcon className="h-6 w-6" style={{ color: dynamicTextColor }}/>
-                {totalItemsInCart > 0 && (
-                  <span className="absolute -top-2 -right-2 flex items-center justify-center h-5 w-5 bg-brand-secondary text-white text-xs rounded-full">
-                    {totalItemsInCart}
-                  </span>
+              <div className="flex items-center space-x-3">
+                {/* Discreet staff login icon – only shown when not logged in */}
+                {!authStatus.isAuthenticated && (
+                  <Link
+                    href="/login?role=waiter"
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Staff Login"
+                  >
+                    <span className="text-xl">🔒</span>
+                  </Link>
                 )}
-              </button>
+                <button onClick={() => {}} className="relative">
+                  <CartIcon className="h-6 w-6" style={{ color: dynamicTextColor }}/>
+                  {totalItemsInCart > 0 && (
+                    <span className="absolute -top-2 -right-2 flex items-center justify-center h-5 w-5 bg-brand-secondary text-white text-xs rounded-full">
+                      {totalItemsInCart}
+                    </span>
+                  )}
+                </button>
+              </div>
             )}
           </ClientOnly>
         </div>

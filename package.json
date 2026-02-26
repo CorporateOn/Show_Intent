@@ -11,6 +11,7 @@
   "dependencies": {
     "@google/genai": "^1.12.0",
     "@google/generative-ai": "^0.24.1",
+    "@heroicons/react": "^2.2.0",
     "@supabase/supabase-js": "^2.57.4",
     "fast-average-color": "^9.5.0",
     "jose": "^6.0.12",
@@ -29,8 +30,8 @@
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.21",
     "dotenv": "^17.2.2",
-    "eslint": "^8",
-    "eslint-config-next": "14.2.5",
+    "eslint": "^10.0.1",
+    "eslint-config-next": "^0.2.4",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "ts-node": "^10.9.2",
