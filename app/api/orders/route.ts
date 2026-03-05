@@ -39,7 +39,6 @@ export async function GET() {
   return NextResponse.json(orders)
 }
 
-// POST /api/orders – place a new order (public)
 export async function POST(req: Request) {
   const body = await req.json()
   const { items, totalPrice, table } = body
