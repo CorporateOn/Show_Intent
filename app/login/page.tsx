@@ -1,11 +1,5 @@
-"use client"
-import { Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
-
-function LoginContent() {
-  const searchParams = useSearchParams();
-  return <div>Your login form</div>;
-}
+import { Suspense } from "react";
+import LoginContent from "./LoginContent";
 
 export default function LoginPage() {
   return (
@@ -14,4 +8,3 @@ export default function LoginPage() {
     </Suspense>
   );
 }
-
