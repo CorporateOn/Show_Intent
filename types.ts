@@ -18,10 +18,10 @@ export interface CartItem extends FoodItem {
 export interface Order {
   id: string;
   items: CartItem[];
-  totalPrice: number;
-  timestamp: Date;
-  table: string;
-  isComplete?: boolean;
+  totalPrice: number;        
+  timestamp: string;    
+  table: string;              
+  status: 'pending' | 'completed';
 }
 
 export interface SavableState {

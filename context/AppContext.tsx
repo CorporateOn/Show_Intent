@@ -1,9 +1,9 @@
 'use client';
 import React, { createContext, useState, useCallback, ReactNode, useEffect, useContext } from 'react';
-import { io, Socket } from "socket.io-client";
 import { FoodItem, Category, CartItem, Order, SavableState } from '@/types';
 import { FastAverageColor } from 'fast-average-color';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabaseClient';   // <-- ADD THIS IMPORT
 
 type UserRole = 'admin' | 'waiter' | null;
 
@@ -87,10 +87,20 @@ interface AppProviderProps {
 
 const fac = new FastAverageColor();
 
+// Helper to map database order (snake_case) to our Order type (camelCase)
+const mapDbOrderToOrder = (dbOrder: any): Order => ({
+  id: dbOrder.id,
+  items: dbOrder.items,
+  totalPrice: dbOrder.total_price,
+  timestamp: dbOrder.timestamp,
+  table: dbOrder.table_number,
+  status: dbOrder.status,
+});
+
 export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData }) => {
   const router = useRouter();
   
-  const [isDataLoaded, setIsDataLoaded] = useState(true);
+  const [isDataLoaded] = useState(true);
   const [restaurantName, setRestaurantName] = useState(initialData.restaurantName);
   const [currency, setCurrency] = useState(initialData.currency);
   const [adminPassword, setAdminPassword] = useState(initialData.adminPassword);
@@ -120,64 +130,205 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [authStatus, setAuthStatus] = useState<AuthStatus>({ isAuthenticated: null, role: null });
-  const [socket, setSocket] = useState<Socket | null>(null);
 
+  // Load cart from localStorage on mount
   useEffect(() => {
-    const initializeSocket = async () => {
-      await fetch('/api/socket');
-      const newSocket = io({ path: '/api/socket' });
-      setSocket(newSocket);
-      newSocket.on("initial_orders", (initialOrders) => setOrders(initialOrders));
-      newSocket.on("new_order_received", (updatedOrders) => setOrders(updatedOrders));
-    };
-    initializeSocket();
-
     try {
       const savedCart = localStorage.getItem('smartQrCart');
       if (savedCart) setCart(JSON.parse(savedCart));
-    } catch (error) { console.error("Failed to parse cart from localStorage", error); }
-
-    return () => {
-      if (socket) socket.disconnect();
-    };
+    } catch (error) {
+      console.error("Failed to parse cart from localStorage", error);
+    }
   }, []);
 
+  // Save cart to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('smartQrCart', JSON.stringify(cart));
   }, [cart]);
 
-  const saveAllSettings = useCallback(async () => {
-    const stateToSave: SavableState = {
-      restaurantName, currency, adminPassword, waiterPassword,
-      categories, menuItems, backgroundImage, headerBgColor, headerTextColor,
-      logoUrl, logoType, textColor,
-      aboutDescription, aboutLocation, aboutPhone, aboutEmail,
-      aboutOwnerName, aboutOwnerTitle, aboutOwnerQuote, aboutOwnerStory,
-      aboutOwnerImage, aboutMotivationQuotes, aboutMapEmbed
+  // ---------- SUPABASE REALTIME ORDERS ----------
+  useEffect(() => {
+    // 1. Fetch initial pending orders
+    const fetchOrders = async () => {
+      try {
+        const res = await fetch('/api/orders');
+        const data = await res.json();
+        // data is an array of database orders (snake_case)
+        setOrders(data.map(mapDbOrderToOrder));
+      } catch (error) {
+        console.error('Error fetching initial orders:', error);
+      }
     };
+    fetchOrders();
+
+    // 2. Subscribe to realtime changes
+    const subscription = supabase
+      .channel('orders-channel')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'orders', filter: 'status=eq.pending' },
+        (payload) => {
+          setOrders((prev) => [...prev, mapDbOrderToOrder(payload.new)]);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        (payload) => {
+          setOrders((prev) =>
+            prev.map((order) =>
+              order.id === payload.new.id ? mapDbOrderToOrder(payload.new) : order
+            )
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // ---------- CART HELPERS ----------
+  const clearCart = useCallback(() => setCart([]), []);
+
+  const cartTotal = cart.reduce((total, item) => total + item.price * item.quantity, 0);
+
+  const addToCart = useCallback((item: FoodItem) => {
+    if (!item.isAvailable) {
+      alert("This item is currently unavailable.");
+      return;
+    }
+    setCart((prevCart) => {
+      const existingItem = prevCart.find((cartItem) => cartItem.id === item.id);
+      if (existingItem) {
+        return prevCart.map((cartItem) =>
+          cartItem.id === item.id
+            ? { ...cartItem, quantity: cartItem.quantity + 1 }
+            : cartItem
+        );
+      }
+      return [...prevCart, { ...item, quantity: 1 }];
+    });
+  }, []);
+
+  const updateCartQuantity = useCallback((itemId: string, quantity: number) => {
+    setCart((prevCart) => {
+      if (quantity <= 0) return prevCart.filter((item) => item.id !== itemId);
+      return prevCart.map((item) =>
+        item.id === itemId ? { ...item, quantity } : item
+      );
+    });
+  }, []);
+
+  // ---------- ORDER ACTIONS ----------
+  const placeOrder = useCallback(async () => {
+    if (cart.length === 0) return;
+
+    const newOrder = {
+      items: cart,
+      totalPrice: cartTotal,
+      table: `Table ${Math.floor(Math.random() * 20) + 1}`, // your logic
+    };
+
     try {
-      const res = await fetch('/api/menu', {
+      const res = await fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(stateToSave),
+        body: JSON.stringify(newOrder),
       });
-      if (!res.ok) throw new Error('Failed to save settings.');
+      if (!res.ok) throw new Error('Failed to place order');
+      const data = await res.json();
+      localStorage.setItem('customerOrderId', data.id);
+      clearCart();
     } catch (error) {
-      console.error("Error saving settings:", error);
-      alert('Failed to save settings. You may be logged out.');
+      console.error('Error placing order:', error);
+      alert('Failed to place order. Please try again.');
     }
-  }, [
-    restaurantName, currency, adminPassword, waiterPassword,
-    categories, menuItems, backgroundImage, headerBgColor, headerTextColor,
-    logoUrl, logoType, textColor,
-    aboutDescription, aboutLocation, aboutPhone, aboutEmail,
-    aboutOwnerName, aboutOwnerTitle, aboutOwnerQuote, aboutOwnerStory,
-    aboutOwnerImage, aboutMotivationQuotes, aboutMapEmbed
-  ]);
+  }, [cart, cartTotal, clearCart]);
 
+  const completeOrder = useCallback(async (orderId: string) => {
+    try {
+      const res = await fetch(`/api/orders?id=${orderId}`, {
+        method: 'PATCH',
+      });
+      if (!res.ok) throw new Error('Failed to complete order');
+      // UI updates via realtime subscription
+    } catch (error) {
+      console.error('Error completing order:', error);
+    }
+  }, []);
+
+  // ---------- MENU & CATEGORY ACTIONS ----------
+  const addMenuItem = useCallback((itemData: Omit<FoodItem, 'id' | 'isAvailable'>) => {
+    const newItem: FoodItem = {
+      id: `item-${Date.now()}`,
+      ...itemData,
+      isAvailable: true,
+    };
+    setMenuItems((prev) => [...prev, newItem]);
+    if (!categories.includes(itemData.category)) {
+      setCategories((prev) => [...prev, itemData.category]);
+    }
+  }, [categories]);
+
+  const updateMenuItem = useCallback((updatedItem: FoodItem) => {
+    setMenuItems((prev) =>
+      prev.map((item) => (item.id === updatedItem.id ? updatedItem : item))
+    );
+    if (!categories.includes(updatedItem.category)) {
+      setCategories((prev) => [...prev, updatedItem.category]);
+    }
+  }, [categories]);
+
+  const deleteMenuItem = useCallback((itemId: string) => {
+    setMenuItems((prev) => prev.filter((item) => item.id !== itemId));
+  }, []);
+
+  const toggleItemAvailability = useCallback((itemId: string) => {
+    setMenuItems((prevItems) =>
+      prevItems.map((item) =>
+        item.id === itemId ? { ...item, isAvailable: !item.isAvailable } : item
+      )
+    );
+  }, []);
+
+  const addCategory = useCallback((category: Category) => {
+    if (category && !categories.includes(category)) {
+      setCategories((prev) => [...prev, category]);
+    }
+  }, [categories]);
+
+  const updateCategory = useCallback((oldName: Category, newName: Category) => {
+    setCategories((prev) => prev.map((c) => (c === oldName ? newName : c)));
+    setMenuItems((prev) =>
+      prev.map((item) =>
+        item.category === oldName ? { ...item, category: newName } : item
+      )
+    );
+  }, []);
+
+  const deleteCategory = useCallback(
+    (categoryToDelete: Category) => {
+      if (menuItems.some((item) => item.category === categoryToDelete)) {
+        alert(
+          `Cannot delete category "${categoryToDelete}" as it is currently assigned to one or more menu items.`
+        );
+        return;
+      }
+      setCategories((prev) => prev.filter((c) => c !== categoryToDelete));
+    },
+    [menuItems]
+  );
+
+  // ---------- AUTH ACTIONS ----------
   const login = async (role: 'admin' | 'waiter', passwordAttempt: string): Promise<boolean> => {
     try {
-      const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role, password: passwordAttempt }) });
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, password: passwordAttempt }),
+      });
       const data = await res.json();
       if (data.success) {
         setAuthStatus({ isAuthenticated: true, role: data.role });
@@ -185,32 +336,44 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
       }
       return false;
     } catch (error) {
-      console.error("Login error:", error);
+      console.error('Login error:', error);
       return false;
     }
   };
 
   const logout = useCallback(async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch(e) { console.error("Logout failed", e); }
-    finally { setAuthStatus({ isAuthenticated: false, role: null }); router.push('/login'); }
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      console.error('Logout failed', e);
+    } finally {
+      setAuthStatus({ isAuthenticated: false, role: null });
+      router.push('/login');
+    }
   }, [router]);
 
-  const updateBackgroundImage = useCallback(async (image: string) => {
-    setBackgroundImage(image);
-    if (logoType === 'logo' && logoUrl) return;
-    if (!image) {
-      setHeaderBgColor('rgba(255, 255, 255, 0.8)');
-      setHeaderTextColor('#1e293b');
-      return;
-    }
-    try {
-      const color = await fac.getColorAsync(image);
-      if (color.error) return;
-      const rgbaColor = `rgba(${color.value[0]}, ${color.value[1]}, ${color.value[2]}, 0.75)`;
-      setHeaderBgColor(rgbaColor);
-      setHeaderTextColor(color.isDark ? '#FFFFFF' : '#1e293b');
-    } catch (e) { console.error('Error getting average color for background:', e); }
-  }, [logoType, logoUrl]);
+  // ---------- VISUAL SETTINGS ----------
+  const updateBackgroundImage = useCallback(
+    async (image: string) => {
+      setBackgroundImage(image);
+      if (logoType === 'logo' && logoUrl) return;
+      if (!image) {
+        setHeaderBgColor('rgba(255, 255, 255, 0.8)');
+        setHeaderTextColor('#1e293b');
+        return;
+      }
+      try {
+        const color = await fac.getColorAsync(image);
+        if (color.error) return;
+        const rgbaColor = `rgba(${color.value[0]}, ${color.value[1]}, ${color.value[2]}, 0.75)`;
+        setHeaderBgColor(rgbaColor);
+        setHeaderTextColor(color.isDark ? '#FFFFFF' : '#1e293b');
+      } catch (e) {
+        console.error('Error getting average color for background:', e);
+      }
+    },
+    [logoType, logoUrl]
+  );
 
   const updateLogo = useCallback(async (url: string) => {
     setLogoUrl(url);
@@ -225,86 +388,139 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
       const rgbaColor = `rgba(${color.value[0]}, ${color.value[1]}, ${color.value[2]}, 0.85)`;
       setHeaderBgColor(rgbaColor);
       setHeaderTextColor(color.isDark ? '#FFFFFF' : '#1e293b');
-    } catch (e) { console.error('Error getting average color for logo:', e); }
+    } catch (e) {
+      console.error('Error getting average color for logo:', e);
+    }
   }, []);
 
-  const addToCart = useCallback((item: FoodItem) => {
-    if (!item.isAvailable) { alert("This item is currently unavailable."); return; }
-    setCart((prevCart) => {
-      const existingItem = prevCart.find((cartItem) => cartItem.id === item.id);
-      if (existingItem) {
-        return prevCart.map((cartItem) => cartItem.id === item.id ? { ...cartItem, quantity: cartItem.quantity + 1 } : cartItem);
-      }
-      return [...prevCart, { ...item, quantity: 1 }];
-    });
-  }, []);
+  // ---------- SAVE ALL SETTINGS ----------
+  const saveAllSettings = useCallback(async () => {
+    const stateToSave: SavableState = {
+      restaurantName,
+      currency,
+      adminPassword,
+      waiterPassword,
+      categories,
+      menuItems,
+      backgroundImage,
+      headerBgColor,
+      headerTextColor,
+      logoUrl,
+      logoType,
+      textColor,
+      aboutDescription,
+      aboutLocation,
+      aboutPhone,
+      aboutEmail,
+      aboutOwnerName,
+      aboutOwnerTitle,
+      aboutOwnerQuote,
+      aboutOwnerStory,
+      aboutOwnerImage,
+      aboutMotivationQuotes,
+      aboutMapEmbed,
+    };
+    try {
+      const res = await fetch('/api/menu', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stateToSave),
+      });
+      if (!res.ok) throw new Error('Failed to save settings.');
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      alert('Failed to save settings. You may be logged out.');
+    }
+  }, [
+    restaurantName,
+    currency,
+    adminPassword,
+    waiterPassword,
+    categories,
+    menuItems,
+    backgroundImage,
+    headerBgColor,
+    headerTextColor,
+    logoUrl,
+    logoType,
+    textColor,
+    aboutDescription,
+    aboutLocation,
+    aboutPhone,
+    aboutEmail,
+    aboutOwnerName,
+    aboutOwnerTitle,
+    aboutOwnerQuote,
+    aboutOwnerStory,
+    aboutOwnerImage,
+    aboutMotivationQuotes,
+    aboutMapEmbed,
+  ]);
 
-  const updateCartQuantity = useCallback((itemId: string, quantity: number) => {
-    setCart((prevCart) => {
-      if (quantity <= 0) return prevCart.filter((item) => item.id !== itemId);
-      return prevCart.map((item) => item.id === itemId ? { ...item, quantity } : item);
-    });
-  }, []);
-
-  const clearCart = useCallback(() => setCart([]), []);
-  const cartTotal = cart.reduce((total, item) => total + item.price * item.quantity, 0);
-
-  const placeOrder = useCallback(() => {
-    if (cart.length === 0 || !socket) return;
-    const newOrder: Order = { id: `order-${Date.now()}`, items: [...cart], totalPrice: cartTotal, timestamp: new Date(), table: `Table ${Math.floor(Math.random() * 20) + 1}` };
-    socket.emit("place_order", newOrder);
-    localStorage.setItem('customerOrderId', newOrder.id);
-    clearCart();
-  }, [cart, cartTotal, clearCart, socket]);
-
-  const completeOrder = useCallback((orderId: string) => { if (socket) socket.emit("complete_order", orderId); }, [socket]);
-
-  const addMenuItem = useCallback((itemData: Omit<FoodItem, 'id' | 'isAvailable'>) => {
-    const newItem: FoodItem = { id: `item-${Date.now()}`, ...itemData, isAvailable: true };
-    setMenuItems(prev => [...prev, newItem]);
-    if (!categories.includes(itemData.category)) setCategories(prev => [...prev, itemData.category]);
-  }, [categories]);
-
-  const updateMenuItem = useCallback((updatedItem: FoodItem) => {
-    setMenuItems(prev => prev.map(item => item.id === updatedItem.id ? updatedItem : item));
-    if (!categories.includes(updatedItem.category)) setCategories(prev => [...prev, updatedItem.category]);
-  }, [categories]);
-
-  const deleteMenuItem = useCallback((itemId: string) => setMenuItems(prev => prev.filter(item => item.id !== itemId)), []);
-  const toggleItemAvailability = useCallback((itemId: string) => setMenuItems(prevItems => prevItems.map(item => item.id === itemId ? { ...item, isAvailable: !item.isAvailable } : item)), []);
-  const addCategory = useCallback((category: Category) => { if (category && !categories.includes(category)) setCategories(prev => [...prev, category]); }, [categories]);
-  const updateCategory = useCallback((oldName: Category, newName: Category) => {
-    setCategories(prev => prev.map(c => c === oldName ? newName : c));
-    setMenuItems(prev => prev.map(item => item.category === oldName ? { ...item, category: newName } : item));
-  }, []);
-  const deleteCategory = useCallback((categoryToDelete: Category) => {
-    if (menuItems.some(item => item.category === categoryToDelete)) { alert(`Cannot delete category "${categoryToDelete}" as it is currently assigned to one or more menu items.`); return; }
-    setCategories(prev => prev.filter(c => c !== categoryToDelete));
-  }, [menuItems]);
-
+  // ---------- CONTEXT VALUE ----------
   const contextValue: AppContextType = {
-    isDataLoaded, restaurantName, setRestaurantName, currency, setCurrency,
-    adminPassword, setAdminPassword, waiterPassword, setWaiterPassword,
-    backgroundImage, updateBackgroundImage, headerBgColor, headerTextColor,
-    categories, addCategory, updateCategory, deleteCategory, menuItems,
-    cart, addToCart, updateCartQuantity, clearCart, cartTotal,
-    orders, placeOrder, completeOrder,
-    addMenuItem, updateMenuItem, deleteMenuItem, toggleItemAvailability,
-    saveAllSettings, authStatus, login, logout,
-    logoUrl, logoType, setLogoType, updateLogo,
-    textColor, setTextColor,
-    // About fields
-    aboutDescription, setAboutDescription,
-    aboutLocation, setAboutLocation,
-    aboutPhone, setAboutPhone,
-    aboutEmail, setAboutEmail,
-    aboutOwnerName, setAboutOwnerName,
-    aboutOwnerTitle, setAboutOwnerTitle,
-    aboutOwnerQuote, setAboutOwnerQuote,
-    aboutOwnerStory, setAboutOwnerStory,
-    aboutOwnerImage, setAboutOwnerImage,
-    aboutMotivationQuotes, setAboutMotivationQuotes,
-    aboutMapEmbed, setAboutMapEmbed,
+    isDataLoaded,
+    restaurantName,
+    setRestaurantName,
+    currency,
+    setCurrency,
+    adminPassword,
+    setAdminPassword,
+    waiterPassword,
+    setWaiterPassword,
+    backgroundImage,
+    updateBackgroundImage,
+    headerBgColor,
+    headerTextColor,
+    categories,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+    menuItems,
+    cart,
+    addToCart,
+    updateCartQuantity,
+    clearCart,
+    cartTotal,
+    orders,
+    placeOrder,
+    completeOrder,
+    addMenuItem,
+    updateMenuItem,
+    deleteMenuItem,
+    toggleItemAvailability,
+    saveAllSettings,
+    authStatus,
+    login,
+    logout,
+    logoUrl,
+    logoType,
+    setLogoType,
+    updateLogo,
+    textColor,
+    setTextColor,
+    aboutDescription,
+    setAboutDescription,
+    aboutLocation,
+    setAboutLocation,
+    aboutPhone,
+    setAboutPhone,
+    aboutEmail,
+    setAboutEmail,
+    aboutOwnerName,
+    setAboutOwnerName,
+    aboutOwnerTitle,
+    setAboutOwnerTitle,
+    aboutOwnerQuote,
+    setAboutOwnerQuote,
+    aboutOwnerStory,
+    setAboutOwnerStory,
+    aboutOwnerImage,
+    setAboutOwnerImage,
+    aboutMotivationQuotes,
+    setAboutMotivationQuotes,
+    aboutMapEmbed,
+    setAboutMapEmbed,
   };
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
@@ -312,6 +528,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
 
 export const useAppContext = () => {
   const context = useContext(AppContext);
-  if (context === undefined) { throw new Error('useAppContext must be used within an AppProvider'); }
+  if (context === undefined) {
+    throw new Error('useAppContext must be used within an AppProvider');
+  }
   return context;
 };

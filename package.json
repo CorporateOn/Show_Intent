@@ -12,15 +12,14 @@
     "@google/genai": "^1.12.0",
     "@google/generative-ai": "^0.24.1",
     "@heroicons/react": "^2.2.0",
+    "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.57.4",
     "fast-average-color": "^9.5.0",
     "jose": "^6.0.12",
     "jsonwebtoken": "^9.0.2",
     "next": "^15.4.5",
     "react": "^18",
-    "react-dom": "^18",
-    "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1"
+    "react-dom": "^18"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.4",
