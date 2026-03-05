@@ -1,3 +1,4 @@
+"use client";
 import React from 'react';
 import { FoodItem } from '@/types';
 import { useAppContext } from '@/context/AppContext'
