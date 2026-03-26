@@ -40,8 +40,8 @@ const AdminDashboard: React.FC = () => {
     const [passwordMessage, setPasswordMessage] = useState({ type: '', text: '' });
 
     useEffect(() => {
-        if (authStatus.isAuthenticated === false) { return; }
-        if (authStatus.role !== 'admin') { router.push('/login'); }
+        if (authStatus.isAuthenticated === null) { return; }
+        if (authStatus.isAuthenticated === false || authStatus.role !== 'admin') { router.push('/login'); }
     }, [authStatus, router]);
 
     useEffect(() => {
@@ -170,7 +170,7 @@ const AdminDashboard: React.FC = () => {
         setPasswordForm({ current: '', new: '', confirm: '' });
     };
 
-    if (!authStatus.isAuthenticated || authStatus.role !== 'admin') {
+    if (authStatus.isAuthenticated !== true || authStatus.role !== 'admin') {
         return <div className="flex items-center justify-center min-h-screen"><p>Loading or redirecting...</p></div>;
     }
 

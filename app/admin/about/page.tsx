@@ -24,7 +24,7 @@ export default function AdminAboutPage() {
   const [newQuote, setNewQuote] = useState('');
 
   // Redirect if not admin
-  if (!authStatus.isAuthenticated || authStatus.role !== 'admin') {
+  if (authStatus.isAuthenticated !== true || authStatus.role !== 'admin') {
     return <div className="p-8 text-center">Access denied. Redirecting...</div>;
   }
 

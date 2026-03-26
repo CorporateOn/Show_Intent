@@ -29,7 +29,6 @@ async function _initializeDbAndGetData(): Promise<SavableState> {
         textColor: '#1e293b',
         categories: defaultCategories,
         menuItems: [],
-        // About fields – provide default empty values
         aboutDescription: '',
         aboutLocation: '',
         aboutPhone: '',
@@ -57,8 +56,8 @@ async function _initializeDbAndGetData(): Promise<SavableState> {
         return defaultData;
 
     } catch (error: any) {
-        if (error.code === '23505') { // 'unique_violation'
-            console.warn("Race condition detected. Another process finished initialization first. Fetching existing data...");
+        if (error.code === '23505') {
+            console.warn("Race condition detected. Fetching existing data...");
             return readDb();
         }
         throw new Error(`Could not initialize database: ${error.message}`);

@@ -52,8 +52,8 @@ const WaiterDashboard: React.FC = () => {
   const router = useRouter();
 
   useEffect(() => {
-    if (authStatus.isAuthenticated === false) {
-       // Let middleware handle redirection
+    if (authStatus.isAuthenticated === null) {
+       // Still initializing, wait for auth status to be determined
        return;
     }
     const isAuthorized = authStatus.role === 'waiter' || authStatus.role === 'admin';
@@ -62,7 +62,7 @@ const WaiterDashboard: React.FC = () => {
     }
   }, [authStatus, router]);
   
-  const isAuthorized = authStatus.isAuthenticated && (authStatus.role === 'waiter' || authStatus.role === 'admin');
+  const isAuthorized = authStatus.isAuthenticated === true && (authStatus.role === 'waiter' || authStatus.role === 'admin');
 
   if (!isAuthorized) {
     // Render a loading state or null while redirecting

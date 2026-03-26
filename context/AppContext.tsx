@@ -1,6 +1,6 @@
 'use client';
 import React, { createContext, useState, useCallback, ReactNode, useEffect, useContext } from 'react';
-import { io, Socket } from "socket.io-client";
+import { createClient } from '@supabase/supabase-js';
 import { FoodItem, Category, CartItem, Order, SavableState } from '@/types';
 import { FastAverageColor } from 'fast-average-color';
 import { useRouter } from 'next/navigation';
@@ -53,7 +53,6 @@ interface AppContextType {
   updateLogo: (url: string) => Promise<void>;
   textColor: string;
   setTextColor: (color: string) => void;
-  // About page fields
   aboutDescription: string;
   setAboutDescription: (val: string) => void;
   aboutLocation: string;
@@ -87,9 +86,14 @@ interface AppProviderProps {
 
 const fac = new FastAverageColor();
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
 export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData }) => {
   const router = useRouter();
-  
+
   const [isDataLoaded, setIsDataLoaded] = useState(true);
   const [restaurantName, setRestaurantName] = useState(initialData.restaurantName);
   const [currency, setCurrency] = useState(initialData.currency);
@@ -103,7 +107,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
   const [logoUrl, setLogoUrl] = useState(initialData.logoUrl);
   const [logoType, setLogoType] = useState(initialData.logoType);
   const [textColor, setTextColor] = useState(initialData.textColor);
-  
+
   // About page state
   const [aboutDescription, setAboutDescription] = useState(initialData.aboutDescription || '');
   const [aboutLocation, setAboutLocation] = useState(initialData.aboutLocation || '');
@@ -116,35 +120,82 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
   const [aboutOwnerImage, setAboutOwnerImage] = useState(initialData.aboutOwnerImage || '');
   const [aboutMotivationQuotes, setAboutMotivationQuotes] = useState<string[]>(initialData.aboutMotivationQuotes || []);
   const [aboutMapEmbed, setAboutMapEmbed] = useState(initialData.aboutMapEmbed || '');
-  
+
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [authStatus, setAuthStatus] = useState<AuthStatus>({ isAuthenticated: null, role: null });
-  const [socket, setSocket] = useState<Socket | null>(null);
 
+  // Load cart from localStorage
   useEffect(() => {
-    const initializeSocket = async () => {
-      await fetch('/api/socket');
-      const newSocket = io({ path: '/api/socket' });
-      setSocket(newSocket);
-      newSocket.on("initial_orders", (initialOrders) => setOrders(initialOrders));
-      newSocket.on("new_order_received", (updatedOrders) => setOrders(updatedOrders));
-    };
-    initializeSocket();
-
     try {
       const savedCart = localStorage.getItem('smartQrCart');
       if (savedCart) setCart(JSON.parse(savedCart));
-    } catch (error) { console.error("Failed to parse cart from localStorage", error); }
-
-    return () => {
-      if (socket) socket.disconnect();
-    };
+    } catch (error) {
+      console.error("Failed to parse cart from localStorage", error);
+    }
   }, []);
 
+  // Persist cart to localStorage
   useEffect(() => {
     localStorage.setItem('smartQrCart', JSON.stringify(cart));
   }, [cart]);
+
+  // Authentication initialization
+  useEffect(() => {
+    const initializeAuth = async () => {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          setAuthStatus({
+            isAuthenticated: data.authenticated,
+            role: data.authenticated ? data.role : null,
+          });
+        } else {
+          setAuthStatus({ isAuthenticated: false, role: null });
+        }
+      } catch (error) {
+        console.error("Failed to initialize auth status:", error);
+        setAuthStatus({ isAuthenticated: false, role: null });
+      }
+    };
+    initializeAuth();
+  }, []);
+
+  // Fetch initial orders and subscribe to realtime updates (no branch filter)
+  useEffect(() => {
+    const fetchOrders = async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('is_complete', false);
+      if (!error && data) setOrders(data);
+    };
+    fetchOrders();
+
+    const subscription = supabase
+      .channel('orders-all')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'orders',
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setOrders((prev) => [...prev, payload.new as Order]);
+          } else if (payload.eventType === 'UPDATE' && payload.new.is_complete) {
+            setOrders((prev) => prev.filter((o) => o.id !== payload.new.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+  }, []);
 
   const saveAllSettings = useCallback(async () => {
     const stateToSave: SavableState = {
@@ -153,7 +204,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
       logoUrl, logoType, textColor,
       aboutDescription, aboutLocation, aboutPhone, aboutEmail,
       aboutOwnerName, aboutOwnerTitle, aboutOwnerQuote, aboutOwnerStory,
-      aboutOwnerImage, aboutMotivationQuotes, aboutMapEmbed
+      aboutOwnerImage, aboutMotivationQuotes, aboutMapEmbed,
     };
     try {
       const res = await fetch('/api/menu', {
@@ -172,12 +223,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
     logoUrl, logoType, textColor,
     aboutDescription, aboutLocation, aboutPhone, aboutEmail,
     aboutOwnerName, aboutOwnerTitle, aboutOwnerQuote, aboutOwnerStory,
-    aboutOwnerImage, aboutMotivationQuotes, aboutMapEmbed
+    aboutOwnerImage, aboutMotivationQuotes, aboutMapEmbed,
   ]);
 
   const login = async (role: 'admin' | 'waiter', passwordAttempt: string): Promise<boolean> => {
     try {
-      const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role, password: passwordAttempt }) });
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role, password: passwordAttempt }),
+      });
       const data = await res.json();
       if (data.success) {
         setAuthStatus({ isAuthenticated: true, role: data.role });
@@ -191,8 +246,14 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
   };
 
   const logout = useCallback(async () => {
-    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch(e) { console.error("Logout failed", e); }
-    finally { setAuthStatus({ isAuthenticated: false, role: null }); router.push('/login'); }
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      console.error("Logout failed", e);
+    } finally {
+      setAuthStatus({ isAuthenticated: false, role: null });
+      router.push('/login');
+    }
   }, [router]);
 
   const updateBackgroundImage = useCallback(async (image: string) => {
@@ -209,7 +270,9 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
       const rgbaColor = `rgba(${color.value[0]}, ${color.value[1]}, ${color.value[2]}, 0.75)`;
       setHeaderBgColor(rgbaColor);
       setHeaderTextColor(color.isDark ? '#FFFFFF' : '#1e293b');
-    } catch (e) { console.error('Error getting average color for background:', e); }
+    } catch (e) {
+      console.error('Error getting average color for background:', e);
+    }
   }, [logoType, logoUrl]);
 
   const updateLogo = useCallback(async (url: string) => {
@@ -225,15 +288,24 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
       const rgbaColor = `rgba(${color.value[0]}, ${color.value[1]}, ${color.value[2]}, 0.85)`;
       setHeaderBgColor(rgbaColor);
       setHeaderTextColor(color.isDark ? '#FFFFFF' : '#1e293b');
-    } catch (e) { console.error('Error getting average color for logo:', e); }
+    } catch (e) {
+      console.error('Error getting average color for logo:', e);
+    }
   }, []);
 
   const addToCart = useCallback((item: FoodItem) => {
-    if (!item.isAvailable) { alert("This item is currently unavailable."); return; }
+    if (!item.isAvailable) {
+      alert("This item is currently unavailable.");
+      return;
+    }
     setCart((prevCart) => {
       const existingItem = prevCart.find((cartItem) => cartItem.id === item.id);
       if (existingItem) {
-        return prevCart.map((cartItem) => cartItem.id === item.id ? { ...cartItem, quantity: cartItem.quantity + 1 } : cartItem);
+        return prevCart.map((cartItem) =>
+          cartItem.id === item.id
+            ? { ...cartItem, quantity: cartItem.quantity + 1 }
+            : cartItem
+        );
       }
       return [...prevCart, { ...item, quantity: 1 }];
     });
@@ -242,22 +314,42 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
   const updateCartQuantity = useCallback((itemId: string, quantity: number) => {
     setCart((prevCart) => {
       if (quantity <= 0) return prevCart.filter((item) => item.id !== itemId);
-      return prevCart.map((item) => item.id === itemId ? { ...item, quantity } : item);
+      return prevCart.map((item) =>
+        item.id === itemId ? { ...item, quantity } : item
+      );
     });
   }, []);
 
   const clearCart = useCallback(() => setCart([]), []);
   const cartTotal = cart.reduce((total, item) => total + item.price * item.quantity, 0);
 
-  const placeOrder = useCallback(() => {
-    if (cart.length === 0 || !socket) return;
-    const newOrder: Order = { id: `order-${Date.now()}`, items: [...cart], totalPrice: cartTotal, timestamp: new Date(), table: `Table ${Math.floor(Math.random() * 20) + 1}` };
-    socket.emit("place_order", newOrder);
-    localStorage.setItem('customerOrderId', newOrder.id);
-    clearCart();
-  }, [cart, cartTotal, clearCart, socket]);
+  const placeOrder = useCallback(async () => {
+    if (cart.length === 0) return;
+    const newOrder: Order = {
+      id: `order-${Date.now()}`,
+      items: [...cart],
+      totalPrice: cartTotal,
+      timestamp: new Date(),
+      table: `Table ${Math.floor(Math.random() * 20) + 1}`,
+      isComplete: false,
+    };
+    try {
+      await fetch('/api/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: newOrder }),
+      });
+      localStorage.setItem('customerOrderId', newOrder.id);
+      clearCart();
+    } catch (error) {
+      console.error('Failed to place order:', error);
+      alert('Failed to place order. Please try again.');
+    }
+  }, [cart, cartTotal, clearCart]);
 
-  const completeOrder = useCallback((orderId: string) => { if (socket) socket.emit("complete_order", orderId); }, [socket]);
+  const completeOrder = useCallback(async (orderId: string) => {
+    await supabase.from('orders').update({ is_complete: true }).eq('id', orderId);
+  }, []);
 
   const addMenuItem = useCallback((itemData: Omit<FoodItem, 'id' | 'isAvailable'>) => {
     const newItem: FoodItem = { id: `item-${Date.now()}`, ...itemData, isAvailable: true };
@@ -278,7 +370,10 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
     setMenuItems(prev => prev.map(item => item.category === oldName ? { ...item, category: newName } : item));
   }, []);
   const deleteCategory = useCallback((categoryToDelete: Category) => {
-    if (menuItems.some(item => item.category === categoryToDelete)) { alert(`Cannot delete category "${categoryToDelete}" as it is currently assigned to one or more menu items.`); return; }
+    if (menuItems.some(item => item.category === categoryToDelete)) {
+      alert(`Cannot delete category "${categoryToDelete}" as it is currently assigned to one or more menu items.`);
+      return;
+    }
     setCategories(prev => prev.filter(c => c !== categoryToDelete));
   }, [menuItems]);
 
@@ -293,7 +388,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
     saveAllSettings, authStatus, login, logout,
     logoUrl, logoType, setLogoType, updateLogo,
     textColor, setTextColor,
-    // About fields
     aboutDescription, setAboutDescription,
     aboutLocation, setAboutLocation,
     aboutPhone, setAboutPhone,
@@ -312,6 +406,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
 
 export const useAppContext = () => {
   const context = useContext(AppContext);
-  if (context === undefined) { throw new Error('useAppContext must be used within an AppProvider'); }
+  if (context === undefined) {
+    throw new Error('useAppContext must be used within an AppProvider');
+  }
   return context;
 };

@@ -24,14 +24,14 @@ export async function POST(request: Request) {
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
         path: '/',
-        maxAge: 60 * 60 * 24, // 24 hours
+        maxAge: 60 * 60 * 24,
       });
-
       return response;
     } else {
       return NextResponse.json({ success: false, error: 'Invalid credentials' }, { status: 401 });
     }
   } catch (error) {
+    console.error(error);
     return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 }
