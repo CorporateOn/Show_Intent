@@ -7,24 +7,31 @@ const supabase = createClient(
 );
 
 export async function POST(request: Request) {
-  const { order } = await request.json();
-  if (!order) {
-    return NextResponse.json({ error: 'Missing order' }, { status: 400 });
+  try {
+    const { order } = await request.json();
+    if (!order) {
+      return NextResponse.json({ error: 'Missing order' }, { status: 400 });
+    }
+
+    console.log('Received order:', order); // 👈 Log incoming order
+
+    const { error } = await supabase.from('orders').insert({
+      id: order.id,
+      items: order.items,
+      total_price: order.totalPrice,
+      table_number: order.table,
+      timestamp: order.timestamp,
+      is_complete: false,
+    });
+
+    if (error) {
+      console.error('Supabase insert error:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('Unexpected error in /api/order:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-
-  const { error } = await supabase.from('orders').insert({
-    id: order.id,
-    items: order.items,
-    total_price: order.totalPrice,
-    table_number: order.table,
-    timestamp: order.timestamp,
-    is_complete: false,
-  });
-
-  if (error) {
-    console.error('Failed to insert order:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ success: true });
 }
