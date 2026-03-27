@@ -38,7 +38,7 @@ interface AppContextType {
   cartTotal: number;
   orders: Order[];
   placeOrder: () => void;
-  completeOrder: (orderId: string) => void;
+  completeOrder: (orderId: string) => Promise<boolean>;
   addMenuItem: (item: Omit<FoodItem, 'id' | 'isAvailable'>) => void;
   updateMenuItem: (item: FoodItem) => void;
   deleteMenuItem: (itemId: string) => void;
@@ -333,14 +333,21 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
       table: `Table ${Math.floor(Math.random() * 20) + 1}`,
       isComplete: false,
     };
+    console.log('Placing order:', newOrder);  // 👈
     try {
-      await fetch('/api/order', {
+      const res = await fetch('/api/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ order: newOrder }),
       });
-      localStorage.setItem('customerOrderId', newOrder.id);
-      clearCart();
+      const result = await res.json();
+      console.log('Order API response:', result);  // 👈
+      if (res.ok) {
+        localStorage.setItem('customerOrderId', newOrder.id);
+        clearCart();
+      } else {
+        alert(`Order failed: ${result.error || 'Unknown error'}`);
+      }
     } catch (error) {
       console.error('Failed to place order:', error);
       alert('Failed to place order. Please try again.');
@@ -348,7 +355,32 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children, initialData 
   }, [cart, cartTotal, clearCart]);
 
   const completeOrder = useCallback(async (orderId: string) => {
-    await supabase.from('orders').update({ is_complete: true }).eq('id', orderId);
+    try {
+      console.log('Attempting to complete order with ID:', orderId);
+      const { data, error } = await supabase
+        .from('orders')
+        .update({ is_complete: true })
+        .eq('id', orderId)   // already a string
+        .select();
+  
+      console.log('Update result data:', data);
+      console.log('Update error:', error);
+  
+      if (error) {
+        console.error('Supabase update error:', error);
+        return false;
+      }
+  
+      if (!data || data.length === 0) {
+        console.warn('No rows updated — order may not exist or already completed');
+        return false;
+      }
+  
+      return true;
+    } catch (err) {
+      console.error('Complete order failed:', err);
+      return false;
+    }
   }, []);
 
   const addMenuItem = useCallback((itemData: Omit<FoodItem, 'id' | 'isAvailable'>) => {
