@@ -6,32 +6,16 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-export async function POST(request: Request) {
-  try {
-    const { order } = await request.json();
-    if (!order) {
-      return NextResponse.json({ error: 'Missing order' }, { status: 400 });
-    }
+export async function GET() {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('is_complete', false)
+    .order('timestamp', { ascending: false });
 
-    console.log('Received order:', order); // 👈 Log incoming order
-
-    const { error } = await supabase.from('orders').insert({
-      id: order.id,
-      items: order.items,
-      total_price: order.totalPrice,
-      table_number: order.table,
-      timestamp: order.timestamp,
-      is_complete: false,
-    });
-
-    if (error) {
-      console.error('Supabase insert error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error('Unexpected error in /api/order:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  return NextResponse.json(data);
 }
